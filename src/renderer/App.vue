@@ -2,11 +2,11 @@
   <div class="app-layout">
     <header class="top-nav">
       <div class="brand">
-        <span class="brand-title">攻防博弈平台</span>
-        <span class="brand-subtitle">网络攻防信号博弈仿真</span>
+        <span class="brand-title">网络攻防博弈仿真平台</span>
+        <span class="brand-subtitle"></span>
       </div>
       <div class="top-actions">
-        <span class="status-pill">Mock 模式</span>
+        <span class="status-pill">  </span>
       </div>
     </header>
     <div class="layout-body">

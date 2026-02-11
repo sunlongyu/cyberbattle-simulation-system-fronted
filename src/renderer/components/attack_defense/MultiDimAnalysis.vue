@@ -5,63 +5,78 @@
         <h2>多维可视分析</h2>
         <p>实时展示信念变化、收益趋势、策略分布与攻击成功率评估。</p>
       </div>
-      <div class="header-actions">
-        <el-button type="primary" @click="exportReport">生成实验报告</el-button>
-      </div>
     </div>
     <div class="module-body">
-      <el-card shadow="never" class="chart-card">
-        <template #header>
-          <div class="card-header">
-            <span>攻击者信念变化曲线</span>
-            <el-tag type="info" effect="plain">Mock</el-tag>
-          </div>
-        </template>
-        <div ref="beliefChart" class="chart-container"></div>
-      </el-card>
-      <el-card shadow="never" class="chart-card">
-        <template #header>
-          <div class="card-header">
-            <span>双方累计收益</span>
-            <el-tag type="success" effect="plain">趋势</el-tag>
-          </div>
-        </template>
-        <div ref="rewardChart" class="chart-container"></div>
-      </el-card>
-      <el-card shadow="never" class="chart-card">
-        <template #header>
-          <div class="card-header">
-            <span>策略分布统计</span>
-            <el-tag type="warning" effect="plain">占比</el-tag>
-          </div>
-        </template>
-        <div ref="strategyChart" class="chart-container"></div>
-      </el-card>
-      <el-card shadow="never" class="chart-card">
-        <template #header>
-          <div class="card-header">
-            <span>攻击成功率评估</span>
-            <el-tag type="danger" effect="plain">核心指标</el-tag>
-          </div>
-        </template>
-        <div class="success-panel">
-          <div ref="successChart" class="chart-container small"></div>
-          <div class="success-summary">
-            <div class="summary-item">
-              <span class="label">总攻击次数</span>
-              <span class="value">{{ analysisData.attackSuccessRate.total }}</span>
-            </div>
-            <div class="summary-item">
-              <span class="label">成功次数</span>
-              <span class="value">{{ analysisData.attackSuccessRate.success }}</span>
-            </div>
-            <div class="summary-item highlight">
-              <span class="label">成功率</span>
-              <span class="value">{{ Math.round(analysisData.attackSuccessRate.rate * 100) }}%</span>
-            </div>
-          </div>
+      <div class="result-bar">
+        <div class="result-select">
+          <span class="result-label">选择推演结果</span>
+          <el-select v-model="selectedResultId" placeholder="请选择已完成推演" @change="applyResult">
+            <el-option v-for="item in resultOptions" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
         </div>
-      </el-card>
+        <div class="result-meta">
+          <div class="meta-item">完成时间：{{ selectedResult?.completedAt || '-' }}</div>
+          <div class="meta-item">环境：{{ selectedResult?.scenarioName || '-' }}</div>
+          <div class="meta-item">模型：{{ selectedResult?.modelName || '-' }}</div>
+        </div>
+      </div>
+      <div class="charts-grid">
+        <el-card shadow="never" class="chart-card">
+          <template #header>
+            <div class="card-header">
+              <span>攻击者信念变化曲线</span>
+              <el-tag type="success" effect="plain">趋势</el-tag>
+            </div>
+          </template>
+          <div ref="beliefChart" class="chart-container"></div>
+        </el-card>
+        <el-card shadow="never" class="chart-card">
+          <template #header>
+            <div class="card-header">
+              <span>双方累计收益</span>
+              <el-tag type="success" effect="plain">趋势</el-tag>
+            </div>
+          </template>
+          <div ref="rewardChart" class="chart-container"></div>
+        </el-card>
+        <el-card shadow="never" class="chart-card">
+          <template #header>
+            <div class="card-header">
+              <span>策略分布统计</span>
+              <el-tag type="warning" effect="plain">占比</el-tag>
+            </div>
+          </template>
+          <div ref="strategyChart" class="chart-container"></div>
+        </el-card>
+        <el-card shadow="never" class="chart-card">
+          <template #header>
+            <div class="card-header">
+              <span>攻击成功率评估</span>
+              <el-tag type="danger" effect="plain">核心指标</el-tag>
+            </div>
+          </template>
+          <div class="success-panel">
+            <div ref="successChart" class="chart-container small"></div>
+            <div class="success-summary">
+              <div class="summary-item">
+                <span class="label">总攻击次数</span>
+                <span class="value">{{ analysisData.attackSuccessRate.total }}</span>
+              </div>
+              <div class="summary-item">
+                <span class="label">成功次数</span>
+                <span class="value">{{ analysisData.attackSuccessRate.success }}</span>
+              </div>
+              <div class="summary-item highlight">
+                <span class="label">成功率</span>
+                <span class="value">{{ Math.round(analysisData.attackSuccessRate.rate * 100) }}%</span>
+              </div>
+            </div>
+          </div>
+        </el-card>
+      </div>
+      <div class="page-actions">
+        <el-button type="primary" :disabled="!selectedResultId" @click="exportReport">生成实验报告</el-button>
+      </div>
     </div>
   </div>
 </template>
@@ -75,7 +90,29 @@ export default {
   data() {
     return {
       analysisData: getMockAnalysisData(),
-      charts: []
+      charts: [],
+      resultOptions: [
+        {
+          id: 'result-001',
+          name: '电网控制区推演 - 回合12',
+          completedAt: '2026-02-10 21:40',
+          scenarioName: '电网控制区场景',
+          modelName: 'SG-MAPPO-Base'
+        },
+        {
+          id: 'result-002',
+          name: '企业内网推演 - 回合15',
+          completedAt: '2026-02-11 09:18',
+          scenarioName: '企业内网场景',
+          modelName: 'PPO-Defense'
+        }
+      ],
+      selectedResultId: 'result-002'
+    }
+  },
+  computed: {
+    selectedResult() {
+      return this.resultOptions.find((item) => item.id === this.selectedResultId)
     }
   },
   mounted() {
@@ -213,6 +250,14 @@ export default {
     resizeCharts() {
       this.charts.forEach((chart) => chart.resize())
     },
+    applyResult() {
+      this.analysisData = getMockAnalysisData()
+      this.charts.forEach((chart) => chart.dispose())
+      this.charts = []
+      this.$nextTick(() => {
+        this.initCharts()
+      })
+    },
     exportReport() {
       this.$message.success('已生成实验报告（Mock）')
     }
@@ -251,6 +296,42 @@ export default {
 }
 
 .module-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.result-bar {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #eef1f6;
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.result-select {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.result-label {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.result-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: #6b7a90;
+  flex-wrap: wrap;
+}
+
+.charts-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 16px;
@@ -310,9 +391,18 @@ export default {
   color: #64748b;
 }
 
+.page-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 @media (max-width: 1200px) {
-  .module-body {
+  .charts-grid {
     grid-template-columns: 1fr;
+  }
+  .result-bar {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>

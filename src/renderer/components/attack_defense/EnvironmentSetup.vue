@@ -5,10 +5,6 @@
         <h2>攻防环境设置</h2>
         <p>配置攻防双方环境与行动策略，预览拓扑后保存实验场景。</p>
       </div>
-      <div class="header-actions">
-        <el-button type="primary" :disabled="!isConfigComplete" @click="openConfigPreview">配置预览</el-button>
-        <el-button :disabled="!isConfigComplete" @click="saveScenario">保存配置</el-button>
-      </div>
     </div>
     <div class="module-body">
       <section class="config-panel">
@@ -16,19 +12,19 @@
           <template #header>
             <div class="card-header">
               <span>配置方案管理</span>
-              <el-tag type="info" effect="plain">可复用</el-tag>
             </div>
           </template>
           <div class="config-manager">
-            <el-select v-model="activeConfigId" placeholder="选择已保存配置" @change="applyScenarioConfig">
+            <el-select v-model="selectedPresetId" placeholder="选择预设配置">
               <el-option
-                v-for="config in savedConfigs"
-                :key="config.id"
-                :label="config.name"
-                :value="config.id"
+                v-for="preset in presetOptions"
+                :key="preset.id"
+                :label="preset.name"
+                :value="preset.id"
               />
             </el-select>
-            <el-button type="primary" @click="createNewScenario">新建配置</el-button>
+            <el-button type="primary" :disabled="!selectedPresetId" @click="applyPresetConfig">应用配置</el-button>
+            <el-button @click="enableCustomConfig">自定义配置</el-button>
           </div>
           <div class="config-meta" v-if="activeConfigMeta">
             <span>最近更新：{{ activeConfigMeta.updatedAt }}</span>
@@ -48,9 +44,12 @@
             <el-form-item label="场景说明">
               <el-input v-model="scenarioConfig.description" type="textarea" rows="2" />
             </el-form-item>
-            <el-form-item label="拓扑规模">
-              <el-input-number v-model="scenarioConfig.parameters.nodeCount" :min="3" :max="50" />
-              <span class="form-tip">节点数量建议与右侧拓扑同步</span>
+            <el-form-item label="真实节点数量">
+              <el-input-number v-model="scenarioConfig.parameters.realNodeCount" :min="1" :max="50" />
+              <span class="form-tip">建议与右侧拓扑同步</span>
+            </el-form-item>
+            <el-form-item label="蜜罐节点数量">
+              <el-input-number v-model="scenarioConfig.parameters.honeypotNodeCount" :min="0" :max="20" />
             </el-form-item>
             <el-form-item label="节点类型">
               <el-select v-model="selectedNodeType" placeholder="选择类型">
@@ -74,9 +73,17 @@
             <el-form-item label="信号噪声">
               <el-slider v-model="scenarioConfig.parameters.signalNoise" :min="0" :max="1" :step="0.05" />
             </el-form-item>
+            <el-divider content-position="left">防御收益参数</el-divider>
+            <el-form-item label="防御成功收益">
+              <el-input-number v-model="scenarioConfig.parameters.rewardMatrix.defenderSuccess" :min="-5" :max="5" />
+            </el-form-item>
+            <el-form-item label="防御失败收益">
+              <el-input-number v-model="scenarioConfig.parameters.rewardMatrix.defenderFail" :min="-5" :max="5" />
+            </el-form-item>
           </el-form>
-          <el-divider content-position="left">防御资源清单</el-divider>
-          <el-table :data="defenseAssets" size="small" border>
+          <el-divider content-position="left">防御资源清单（可选）</el-divider>
+          <el-switch v-model="showDefenseAssets" active-text="展示" inactive-text="隐藏" />
+          <el-table v-if="showDefenseAssets" :data="defenseAssets" size="small" border>
             <el-table-column prop="name" label="节点名称" />
             <el-table-column prop="type" label="系统类型" />
             <el-table-column prop="role" label="角色" />
@@ -114,23 +121,19 @@
                 <el-checkbox label="DDoS 攻击" />
               </el-checkbox-group>
             </el-form-item>
-          </el-form>
-          <el-divider content-position="left">收益参数</el-divider>
-          <el-form :model="scenarioConfig.parameters.rewardMatrix" label-width="120px">
+            <el-divider content-position="left">攻击收益参数</el-divider>
             <el-form-item label="攻击成功收益">
               <el-input-number v-model="scenarioConfig.parameters.rewardMatrix.attackerSuccess" :min="-5" :max="5" />
             </el-form-item>
             <el-form-item label="攻击失败收益">
               <el-input-number v-model="scenarioConfig.parameters.rewardMatrix.attackerFail" :min="-5" :max="5" />
             </el-form-item>
-            <el-form-item label="防御成功收益">
-              <el-input-number v-model="scenarioConfig.parameters.rewardMatrix.defenderSuccess" :min="-5" :max="5" />
-            </el-form-item>
-            <el-form-item label="防御失败收益">
-              <el-input-number v-model="scenarioConfig.parameters.rewardMatrix.defenderFail" :min="-5" :max="5" />
-            </el-form-item>
           </el-form>
         </el-card>
+        <div class="config-actions">
+          <el-button type="primary" :disabled="!canPreview" @click="openConfigPreview">配置预览</el-button>
+          <el-button :disabled="!isConfigComplete" @click="saveScenario">保存配置</el-button>
+        </div>
       </section>
       <section class="topology-panel">
         <div class="topology-header">
@@ -149,12 +152,17 @@
             </div>
           </div>
         </div>
-        <NetworkTopo :show-large-screen="false" />
+        <div v-if="!showTopologyPreview" class="topology-empty">
+          点击左侧“配置预览”后展示拓扑结构。
+        </div>
+        <NetworkTopo
+          v-else
+          :show-large-screen="false"
+          :show-player-status="false"
+          :topology-data="scenarioConfig.topology"
+        />
       </section>
     </div>
-    <el-dialog v-model="showConfigPreview" title="场景配置预览" width="640px">
-      <pre class="config-preview">{{ formattedScenario }}</pre>
-    </el-dialog>
   </div>
 </template>
 
@@ -168,6 +176,14 @@ import {
   getActiveScenarioConfig
 } from '@/core/configStore'
 
+const iconMap = {
+  switch: require('@/assets/switch.png'),
+  router: require('@/assets/router.png'),
+  server: require('@/assets/server.png'),
+  host: require('@/assets/host.png'),
+  honeypot: require('@/assets/server_defend.png')
+}
+
 export default {
   name: 'EnvironmentSetup',
   components: {
@@ -176,8 +192,12 @@ export default {
   data() {
     return {
       scenarioConfig: this.buildScenarioConfig(),
-      showConfigPreview: false,
+      showTopologyPreview: false,
+      canPreview: false,
       selectedNodeType: '',
+      selectedPresetId: '',
+      isCustomConfig: false,
+      showDefenseAssets: false,
       attackerConfig: {
         targetZone: 'core',
         attackStyle: 'stealth',
@@ -194,6 +214,10 @@ export default {
         { label: 'RTU', value: 'RTU' },
         { label: 'PLC', value: 'PLC' },
         { label: '蜜罐', value: '蜜罐' }
+      ],
+      presetOptions: [
+        { id: 'preset-electric-grid', name: '电网中心典型拓扑' },
+        { id: 'preset-enterprise-lan', name: '企业内网典型拓扑' }
       ],
       savedConfigs: [],
       activeConfigId: ''
@@ -213,7 +237,9 @@ export default {
     },
     isConfigComplete() {
       const hasName = this.scenarioConfig.name && this.scenarioConfig.name.trim().length > 0
-      const hasTopology = this.scenarioConfig.parameters.nodeCount > 0
+      const hasTopology =
+        this.scenarioConfig.parameters.realNodeCount > 0 ||
+        this.scenarioConfig.parameters.honeypotNodeCount > 0
       const hasTypes = this.scenarioConfig.parameters.nodeTypes.length > 0
       return hasName && hasTopology && hasTypes
     },
@@ -225,6 +251,20 @@ export default {
   created() {
     this.loadScenarioConfigs()
   },
+  watch: {
+    'scenarioConfig.parameters.realNodeCount'() {
+      this.syncTopologyFromCounts()
+    },
+    'scenarioConfig.parameters.honeypotNodeCount'() {
+      this.syncTopologyFromCounts()
+    },
+    'scenarioConfig.parameters.nodeTypes': {
+      handler() {
+        this.syncTopologyFromCounts()
+      },
+      deep: true
+    }
+  },
   methods: {
     buildScenarioConfig() {
       const base = getMockScenarioConfig()
@@ -234,8 +274,11 @@ export default {
         parameters: {
           ...base.parameters,
           nodeCount: 8,
+          realNodeCount: 6,
+          honeypotNodeCount: 2,
           nodeTypes: ['控制中心', 'SCADA', 'RTU', '蜜罐']
-        }
+        },
+        topology: this.decorateTopology(base.topology)
       }
     },
     addNodeType() {
@@ -249,7 +292,8 @@ export default {
       this.scenarioConfig.parameters.nodeTypes.splice(index, 1)
     },
     openConfigPreview() {
-      this.showConfigPreview = true
+      if (!this.canPreview) return
+      this.showTopologyPreview = true
     },
     saveScenario() {
       if (!this.isConfigComplete) {
@@ -268,9 +312,11 @@ export default {
       }
       this.savedConfigs = saveScenarioConfig(payload)
       this.activeConfigId = payload.id
+      this.canPreview = true
       this.$message.success('已保存场景配置')
     },
-    createNewScenario() {
+    enableCustomConfig() {
+      this.isCustomConfig = true
       this.scenarioConfig = this.buildScenarioConfig()
       this.attackerConfig = {
         targetZone: 'core',
@@ -283,11 +329,24 @@ export default {
         { name: '蜜罐-1', type: '蜜罐', role: '诱捕', status: '激活' }
       ]
       this.activeConfigId = ''
+      this.selectedPresetId = ''
+      this.canPreview = false
+      this.showTopologyPreview = false
+    },
+    applyPresetConfig() {
+      const preset = this.getPresetById(this.selectedPresetId)
+      if (!preset) return
+      this.applyPresetData(preset)
+      this.isCustomConfig = false
+      this.canPreview = true
+      this.showTopologyPreview = true
+      this.activeConfigId = ''
     },
     loadScenarioConfigs() {
       this.savedConfigs = getScenarioConfigs()
       const active = getActiveScenarioConfig()
       if (active) {
+        this.isCustomConfig = true
         this.activeConfigId = active.id
         this.applyScenarioConfig(active.id)
       }
@@ -307,6 +366,175 @@ export default {
       }
       this.attackerConfig = config.attackerConfig || this.attackerConfig
       this.defenseAssets = config.defenseAssets || this.defenseAssets
+      this.canPreview = true
+    }
+    ,
+    syncTopologyFromCounts() {
+      if (!this.isCustomConfig) return
+      const realCount = Number(this.scenarioConfig.parameters.realNodeCount || 0)
+      const honeypotCount = Number(this.scenarioConfig.parameters.honeypotNodeCount || 0)
+      const allTypes = Array.isArray(this.scenarioConfig.parameters.nodeTypes)
+        ? this.scenarioConfig.parameters.nodeTypes
+        : []
+      const realTypes = allTypes.filter((type) => type !== '蜜罐')
+      const realTypePool = realTypes.length > 0 ? realTypes : ['业务节点']
+      const nodes = []
+      const links = []
+      for (let i = 1; i <= realCount; i += 1) {
+        const typeName = realTypePool[(i - 1) % realTypePool.length]
+        nodes.push({
+          id: `real-${i}`,
+          label: `${typeName}-${i}`,
+          type: typeName,
+          shape: 'image',
+          image: this.resolveNodeIcon(typeName),
+          zone: 'core'
+        })
+        if (i > 1) {
+          links.push({
+            id: `link-real-${i - 1}-${i}`,
+            from: `real-${i - 1}`,
+            to: `real-${i}`,
+            type: 'core'
+          })
+        }
+      }
+      for (let i = 1; i <= honeypotCount; i += 1) {
+        nodes.push({
+          id: `honeypot-${i}`,
+          label: `蜜罐-${i}`,
+          type: 'honeypot',
+          shape: 'image',
+          image: this.resolveNodeIcon('honeypot'),
+          zone: 'dmz'
+        })
+        if (realCount > 0) {
+          links.push({
+            id: `link-honeypot-${i}`,
+            from: 'real-1',
+            to: `honeypot-${i}`,
+            type: 'honeypot'
+          })
+        }
+      }
+      this.scenarioConfig = {
+        ...this.scenarioConfig,
+        topology: {
+          nodes,
+          links
+        }
+      }
+    },
+    getPresetById(presetId) {
+      if (!presetId) return null
+      if (presetId === 'preset-electric-grid') {
+        const base = getMockScenarioConfig()
+        return {
+          id: presetId,
+          name: '电网中心典型拓扑',
+          description: '电网调度中心典型攻防拓扑预设',
+          topology: base.topology,
+          parameters: {
+            ...base.parameters,
+            nodeCount: 8,
+            realNodeCount: 6,
+            honeypotNodeCount: 2,
+            nodeTypes: ['控制中心', 'SCADA', 'RTU', '蜜罐']
+          },
+          attackerConfig: {
+            targetZone: 'core',
+            attackStyle: 'stealth',
+            allowedActions: ['主机探测', '链路探测', '漏洞利用']
+          },
+          defenseAssets: [
+            { name: '调度中心', type: '真实系统', role: '核心节点', status: '稳定' },
+            { name: 'SCADA 主站', type: '真实系统', role: '控制节点', status: '稳定' },
+            { name: '蜜罐-1', type: '蜜罐', role: '诱捕', status: '激活' }
+          ]
+        }
+      }
+      if (presetId === 'preset-enterprise-lan') {
+        return {
+          id: presetId,
+          name: '企业内网典型拓扑',
+          description: '企业办公内网与业务区典型攻防拓扑预设',
+          topology: {
+            nodes: [
+              { id: 'core', label: '核心交换', type: 'core', zone: 'core' },
+              { id: 'dmz', label: 'DMZ 网关', type: 'gateway', zone: 'dmz' },
+              { id: 'app', label: '应用服务器', type: 'app', zone: 'core' },
+              { id: 'db', label: '数据库服务器', type: 'db', zone: 'core' },
+              { id: 'pc-1', label: '办公终端-1', type: 'pc', zone: 'field' },
+              { id: 'pc-2', label: '办公终端-2', type: 'pc', zone: 'field' },
+              { id: 'honeypot', label: '蜜罐-1', type: 'honeypot', zone: 'dmz' }
+            ],
+            links: [
+              { id: 'link-core-dmz', from: 'core', to: 'dmz', type: 'gateway' },
+              { id: 'link-core-app', from: 'core', to: 'app', type: 'service' },
+              { id: 'link-core-db', from: 'core', to: 'db', type: 'service' },
+              { id: 'link-core-pc1', from: 'core', to: 'pc-1', type: 'office' },
+              { id: 'link-core-pc2', from: 'core', to: 'pc-2', type: 'office' },
+              { id: 'link-dmz-hp', from: 'dmz', to: 'honeypot', type: 'honeypot' }
+            ]
+          },
+          parameters: {
+            ...this.scenarioConfig.parameters,
+            nodeCount: 7,
+            realNodeCount: 6,
+            honeypotNodeCount: 1,
+            nodeTypes: ['核心交换', '应用服务器', '数据库', '办公终端', '蜜罐']
+          },
+          attackerConfig: {
+            targetZone: 'core',
+            attackStyle: 'pressure',
+            allowedActions: ['主机探测', '漏洞利用', 'DDoS 攻击']
+          },
+          defenseAssets: [
+            { name: '核心交换', type: '真实系统', role: '网络核心', status: '稳定' },
+            { name: '应用服务器', type: '真实系统', role: '业务节点', status: '稳定' },
+            { name: '蜜罐-1', type: '蜜罐', role: '诱捕', status: '激活' }
+          ]
+        }
+      }
+      return null
+    },
+    applyPresetData(preset) {
+      this.scenarioConfig = {
+        ...this.scenarioConfig,
+        id: `scenario-${Date.now()}`,
+        name: preset.name,
+        description: preset.description,
+        parameters: preset.parameters,
+        topology: this.decorateTopology(preset.topology)
+      }
+      this.attackerConfig = preset.attackerConfig || this.attackerConfig
+      this.defenseAssets = preset.defenseAssets || this.defenseAssets
+    },
+    resolveNodeIcon(typeName) {
+      const key = (typeName || '').toString()
+      if (['控制中心', '核心交换', '交换机', 'switch'].includes(key)) return iconMap.switch
+      if (['路由器', '路由', 'router'].includes(key)) return iconMap.router
+      if (['SCADA', '应用服务器', '数据库', 'server', 'app', 'db'].includes(key)) return iconMap.server
+      if (['RTU', 'PLC', '办公终端', '终端', 'host', 'pc'].includes(key)) return iconMap.host
+      if (['蜜罐', 'honeypot'].includes(key)) return iconMap.honeypot
+      if (['control-center', 'core'].includes(key)) return iconMap.switch
+      return iconMap.server
+    },
+    decorateTopology(topology) {
+      if (!topology || !Array.isArray(topology.nodes)) return topology
+      const nodes = topology.nodes.map((node) => {
+        if (node.image) return node
+        const image = this.resolveNodeIcon(node.type || node.label)
+        return {
+          ...node,
+          shape: 'image',
+          image
+        }
+      })
+      return {
+        ...topology,
+        nodes
+      }
     }
   }
 }
@@ -458,6 +686,22 @@ export default {
   font-size: 12px;
   max-height: 380px;
   overflow: auto;
+}
+
+.config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.topology-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 13px;
+  padding: 24px;
 }
 
 @media (max-width: 1200px) {

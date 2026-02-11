@@ -14,22 +14,36 @@
         >
           <el-option v-for="config in scenarioConfigs" :key="config.id" :label="config.name" :value="config.id" />
         </el-select>
+        <el-select
+          v-model="activeModelId"
+          placeholder="选择已激活模型"
+          class="scenario-select"
+          @change="onModelChange"
+        >
+          <el-option v-for="model in activeModels" :key="model.id" :label="model.name" :value="model.id" />
+        </el-select>
         <el-button type="primary" :disabled="!canRunSimulation || isPlaying" @click="startSimulation">开始</el-button>
         <el-button :disabled="!isPlaying" @click="pauseSimulation">暂停</el-button>
-        <el-button :disabled="!canRunSimulation" @click="stepSimulation">单步</el-button>
         <el-button type="warning" :disabled="!canRunSimulation" @click="resetSimulation">重置</el-button>
       </div>
     </div>
     <div class="module-body">
       <section class="topology-panel">
-        <NetworkTopo />
+        <NetworkTopo :show-player-status="false" :show-large-screen="false" />
       </section>
       <section class="control-panel">
+        <el-alert
+          v-if="activeModels.length === 0"
+          class="status-card warning-card"
+          title="尚未激活模型，请先在“智能策略集成”中训练并激活模型"
+          type="warning"
+          show-icon
+        />
         <el-card shadow="never" class="status-card">
           <template #header>
             <div class="card-header">
               <span>推演配置摘要</span>
-              <el-tag type="info" effect="plain">来自环境设置</el-tag>
+             
             </div>
           </template>
           <div v-if="activeScenario" class="status-grid">
@@ -39,7 +53,7 @@
             </div>
             <div class="status-item">
               <div class="status-label">节点规模</div>
-              <div class="status-value">{{ activeScenario.parameters.nodeCount }}</div>
+              <div class="status-value">{{ nodeScaleLabel }}</div>
             </div>
             <div class="status-item">
               <div class="status-label">节点类型</div>
@@ -53,13 +67,17 @@
               <div class="status-label">策略模型</div>
               <div class="status-value">{{ activeModelName }}</div>
             </div>
+            <div class="status-item">
+              <div class="status-label">模型指标</div>
+              <div class="status-value">{{ activeModelMetric }}</div>
+            </div>
           </div>
           <el-empty v-else description="尚未选择配置，请先在左侧选择场景" />
         </el-card>
         <el-card shadow="never" class="status-card">
           <template #header>
             <div class="card-header">
-              <span>推演状态</span>
+              <span>运行状态</span>
               <el-tag :type="isPlaying ? 'success' : 'info'" effect="plain">
                 {{ isPlaying ? '运行中' : '暂停' }}
               </el-tag>
@@ -86,33 +104,12 @@
             </div>
           </div>
         </el-card>
-        <el-card shadow="never" class="status-card">
-          <template #header>
-            <div class="card-header">
-              <span>动作摘要</span>
-              <el-tag type="warning" effect="plain">Mock</el-tag>
-            </div>
-          </template>
-          <div class="action-summary">
-            <div class="action-row">
-              <span class="label">攻击动作：</span>
-              <span class="value">{{ currentRound.attackerAction }}</span>
-            </div>
-            <div class="action-row">
-              <span class="label">防御动作：</span>
-              <span class="value">{{ currentRound.defenderAction }}</span>
-            </div>
-            <div class="action-row">
-              <span class="label">观测信号：</span>
-              <span class="value">{{ currentRound.signal }}</span>
-            </div>
-          </div>
-        </el-card>
         <el-card shadow="never" class="status-card log-card">
           <template #header>
             <div class="card-header">
               <span>对抗日志流</span>
-              <el-tag type="info" effect="plain">滚动</el-tag>
+              <span class="log-meta">{{ logMeta }}</span>
+              
             </div>
           </template>
           <div class="log-list">
@@ -122,6 +119,24 @@
               <span class="log-message" :class="`log-${log.level}`">{{ log.message }}</span>
             </div>
           </div>
+        </el-card>
+        <el-card shadow="never" class="status-card">
+          <template #header>
+            <div class="card-header">
+              <span>高级控制</span>
+            </div>
+          </template>
+          <el-collapse v-model="advancedPanel">
+            <el-collapse-item name="step">
+              <template #title>
+                单步推演
+              </template>
+              <div class="advanced-body">
+                <div class="advanced-tip">适用于分析每个回合的动作与状态变化。</div>
+                <el-button :disabled="!canRunSimulation" @click="stepSimulation">单步执行</el-button>
+              </div>
+            </el-collapse-item>
+          </el-collapse>
         </el-card>
       </section>
     </div>
@@ -153,7 +168,9 @@ export default {
       logStream: [],
       scenarioConfigs: [],
       activeScenarioId: '',
-      activeScenario: null
+      activeScenario: null,
+      activeModelId: '',
+      advancedPanel: []
     }
   },
   computed: {
@@ -161,14 +178,37 @@ export default {
       return this.rounds[this.currentRoundIndex]
     },
     canRunSimulation() {
-      return Boolean(this.activeScenario)
+      return Boolean(this.activeScenario && this.activeModelId)
+    },
+    activeModels() {
+      return getStrategyModels().filter((item) => item.status === 'active')
+    },
+    activeModel() {
+      if (!this.activeModelId) return null
+      return getStrategyModels().find((item) => item.id === this.activeModelId) || null
     },
     activeModelName() {
-      const models = getStrategyModels()
-      const activeId = getActiveStrategyModelId()
-      if (!activeId) return '未选择'
-      const current = models.find((item) => item.id === activeId)
-      return current ? current.name : '未选择'
+      return this.activeModel ? this.activeModel.name : '未选择'
+    },
+    activeModelMetric() {
+      if (!this.activeModel || !this.activeModel.metrics) return '-'
+      return `胜率 ${this.activeModel.metrics.winRate}% / 收益 ${this.activeModel.metrics.avgReward}`
+    },
+    logMeta() {
+      if (!this.activeModel) return '模型未选择'
+      const version = this.activeModel.version || '-'
+      const trainedAt = this.activeModel.lastTrainedAt || '-'
+      return `版本 ${version} · 训练 ${trainedAt}`
+    },
+    nodeScaleLabel() {
+      if (!this.activeScenario) return '-'
+      const params = this.activeScenario.parameters || {}
+      const realCount = params.realNodeCount
+      const honeypotCount = params.honeypotNodeCount
+      if (realCount !== undefined || honeypotCount !== undefined) {
+        return `真实 ${realCount || 0} / 蜜罐 ${honeypotCount || 0}`
+      }
+      return params.nodeCount
     },
     maxRounds() {
       if (!this.activeScenario) return this.currentRound.round
@@ -178,6 +218,7 @@ export default {
   mounted() {
     this.loadScenarioConfigs()
     this.resetSimulation()
+    this.advancedPanel = []
   },
   beforeUnmount() {
     this.clearTimer()
@@ -235,6 +276,10 @@ export default {
         this.activeScenarioId = active.id
         this.activeScenario = active
       }
+      this.activeModelId = getActiveStrategyModelId() || ''
+    },
+    onModelChange(modelId) {
+      this.activeModelId = modelId
     },
     onScenarioChange(configId) {
       const selected = this.scenarioConfigs.find((item) => item.id === configId)
@@ -309,6 +354,10 @@ export default {
   border: 1px solid #eef1f6;
 }
 
+.warning-card {
+  margin-bottom: 0;
+}
+
 .status-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -332,26 +381,15 @@ export default {
   font-weight: 600;
 }
 
-.action-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  font-size: 13px;
-}
-
-.action-row .label {
-  color: #6b7a90;
-}
-
-.action-row .value {
-  margin-left: 4px;
-  font-weight: 600;
-}
-
 .log-card {
   flex: 1;
   display: flex;
   flex-direction: column;
+}
+
+.log-meta {
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 .log-list {
@@ -401,6 +439,19 @@ export default {
 
 .log-danger {
   color: #dc2626;
+}
+
+.advanced-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.advanced-tip {
+  font-size: 12px;
+  color: #64748b;
 }
 
 @media (max-width: 1200px) {

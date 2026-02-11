@@ -10,7 +10,7 @@
                      <el-button type="primary" size="small" @click="showNetworkModeConfig = true">设置</el-button>
                 </div>
             </div>
-            <div class="gaming-status-box">
+            <div v-if="showPlayerStatus" class="gaming-status-box">
                 <div class="gaming-status-item">
                     当前player
                 </div>
@@ -87,6 +87,14 @@ export default {
         showLargeScreen: {
             type: Boolean,
             default: true
+        },
+        topologyData: {
+            type: Object,
+            default: null
+        },
+        showPlayerStatus: {
+            type: Boolean,
+            default: true
         }
      },
      data() {
@@ -141,6 +149,16 @@ export default {
                 console.log("update networkConfigData:",newVal)
                 this.networkConfigData = newVal
             }               
+        },
+        topologyData: {
+            handler(newVal){
+                if(!newVal) return
+                const topoData = this.normalizeTopologyData(newVal)
+                if(topoData){
+                    this.applyExternalTopology(topoData)
+                }
+            },
+            deep: true
         }
      },
      created() {
@@ -228,10 +246,18 @@ export default {
             });
         },
         loadNetworkTopoData() {
-            let data = getNetworkDynamicMapData()
-            console.log(data)
-            let nodes = Object.values(data['nodes'])
-            let edges = data['links']
+            let nodes = []
+            let edges = []
+            if (this.topologyData && this.topologyData.nodes && (this.topologyData.links || this.topologyData.edges)) {
+                const topoData = this.normalizeTopologyData(this.topologyData)
+                nodes = topoData.nodes
+                edges = topoData.edges
+            } else {
+                let data = getNetworkDynamicMapData()
+                console.log(data)
+                nodes = Object.values(data['nodes'])
+                edges = data['links']
+            }
             let topoData = {
                 nodes: nodes,
                 edges: edges
@@ -242,6 +268,31 @@ export default {
             }
             this.oldNetworkTopoData =topoData
             return topoData
+        },
+        normalizeTopologyData(rawData){
+            if(!rawData) return null
+            const nodes = rawData.nodes || []
+            const edges = rawData.links || rawData.edges || []
+            return { nodes, edges }
+        },
+        applyExternalTopology(topoData){
+            const nodes = topoData.nodes || []
+            const edges = topoData.edges || []
+            if (!this.networkTopoData || !this.networkTopoData.nodes || !this.networkTopoData.edges) {
+                this.networkTopoData = {
+                    nodes: new vis.DataSet(nodes),
+                    edges: new vis.DataSet(edges)
+                }
+            } else {
+                this.networkTopoData.nodes.clear()
+                this.networkTopoData.edges.clear()
+                this.networkTopoData.nodes.add(nodes)
+                this.networkTopoData.edges.add(edges)
+            }
+            this.oldNetworkTopoData = { nodes, edges }
+            if (this.network) {
+                this.network.setData(this.networkTopoData)
+            }
         },
         reloadNetworkTopoData(data){
             let nodes = data['nodes']
