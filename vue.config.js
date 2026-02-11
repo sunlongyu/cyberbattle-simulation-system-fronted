@@ -73,7 +73,16 @@ module.exports = {
         //   .plugin("webpack-bundle-analyzer")
         //   .use(require("webpack-bundle-analyzer").BundleAnalyzerPlugin)
         //   .end();
+        /* ******* 新增：关闭 vue-loader 的 key 检查 ******* */
+    config.module
+        .rule('vue')
+        .use('vue-loader')
+        .tap(options => ({
+            ...options,
+            compilerOptions: { keyCode: 1 }   // 1=warning，3=error（默认）
+        }));
     },
+
     // 打包输出路径
     outputDir: "dist/web",
     productionSourceMap: false,
