@@ -3,7 +3,7 @@
     <div class="module-header">
       <div>
         <h2>攻防环境设置</h2>
-        <p>配置攻防双方环境与行动策略，预览拓扑后保存实验场景。</p>
+        <p>配置攻防双方环境与行动策略，保存实验场景并展示拓扑。</p>
       </div>
     </div>
     <div class="module-body">
@@ -15,7 +15,19 @@
             </div>
           </template>
           <div class="config-manager">
-            <el-select v-model="selectedPresetId" placeholder="选择预设配置">
+            <el-select v-model="activeConfigId" placeholder="应用配置" @change="applyScenarioConfig">
+              <el-option
+                v-for="config in savedConfigs"
+                :key="config.id"
+                :label="config.name"
+                :value="config.id"
+              />
+            </el-select>
+            <el-button :disabled="!activeConfigId" @click="applyScenarioConfig(activeConfigId)">应用配置</el-button>
+            <el-button @click="enableCustomConfig">新建场景</el-button>
+          </div>
+          <div class="config-manager secondary-manager">
+            <el-select v-model="selectedPresetId" placeholder="预设模板">
               <el-option
                 v-for="preset in presetOptions"
                 :key="preset.id"
@@ -23,8 +35,7 @@
                 :value="preset.id"
               />
             </el-select>
-            <el-button type="primary" :disabled="!selectedPresetId" @click="applyPresetConfig">应用配置</el-button>
-            <el-button @click="enableCustomConfig">自定义配置</el-button>
+            <el-button type="primary" :disabled="!selectedPresetId" @click="applyPresetConfig">应用模板</el-button>
           </div>
           <div class="config-meta" v-if="activeConfigMeta">
             <span>最近更新：{{ activeConfigMeta.updatedAt }}</span>
@@ -33,7 +44,7 @@
         <el-card shadow="never" class="config-card">
           <template #header>
             <div class="card-header">
-              <span>防御者环境配置</span>
+              <span>防御场景配置</span>
               <el-tag type="success" effect="plain">环境</el-tag>
             </div>
           </template>
@@ -45,7 +56,7 @@
               <el-input v-model="scenarioConfig.description" type="textarea" rows="2" />
             </el-form-item>
             <el-form-item label="真实节点数量">
-              <el-input-number v-model="scenarioConfig.parameters.realNodeCount" :min="1" :max="50" />
+              <el-input-number v-model="scenarioConfig.parameters.realNodeCount" :min="0" :max="50" />
               <span class="form-tip">建议与右侧拓扑同步</span>
             </el-form-item>
             <el-form-item label="蜜罐节点数量">
@@ -82,8 +93,7 @@
             </el-form-item>
           </el-form>
           <el-divider content-position="left">防御资源清单（可选）</el-divider>
-          <el-switch v-model="showDefenseAssets" active-text="展示" inactive-text="隐藏" />
-          <el-table v-if="showDefenseAssets" :data="defenseAssets" size="small" border>
+          <el-table :data="defenseAssets" size="small" border>
             <el-table-column prop="name" label="节点名称" />
             <el-table-column prop="type" label="系统类型" />
             <el-table-column prop="role" label="角色" />
@@ -131,8 +141,7 @@
           </el-form>
         </el-card>
         <div class="config-actions">
-          <el-button type="primary" :disabled="!canPreview" @click="openConfigPreview">配置预览</el-button>
-          <el-button :disabled="!isConfigComplete" @click="saveScenario">保存配置</el-button>
+          <el-button type="primary" :disabled="!isConfigComplete" @click="saveScenario">保存场景</el-button>
         </div>
       </section>
       <section class="topology-panel">
@@ -153,7 +162,7 @@
           </div>
         </div>
         <div v-if="!showTopologyPreview" class="topology-empty">
-          点击左侧“配置预览”后展示拓扑结构。
+          保存或应用模板后展示拓扑结构。
         </div>
         <NetworkTopo
           v-else
@@ -175,6 +184,11 @@ import {
   setActiveScenarioConfigId,
   getActiveScenarioConfig
 } from '@/core/configStore'
+import {
+  createScenario,
+  fetchScenarioConfigs,
+  updateScenario
+} from '@/core/scenarioService'
 
 const iconMap = {
   switch: require('@/assets/switch.png'),
@@ -193,11 +207,9 @@ export default {
     return {
       scenarioConfig: this.buildScenarioConfig(),
       showTopologyPreview: false,
-      canPreview: false,
       selectedNodeType: '',
       selectedPresetId: '',
       isCustomConfig: false,
-      showDefenseAssets: false,
       attackerConfig: {
         targetZone: 'core',
         attackStyle: 'stealth',
@@ -220,7 +232,8 @@ export default {
         { id: 'preset-enterprise-lan', name: '企业内网典型拓扑' }
       ],
       savedConfigs: [],
-      activeConfigId: ''
+      activeConfigId: '',
+      isSyncingTopology: false
     }
   },
   computed: {
@@ -236,11 +249,13 @@ export default {
       )
     },
     isConfigComplete() {
+      const parameters = this.scenarioConfig.parameters || {}
+      const nodeTypes = Array.isArray(parameters.nodeTypes) ? parameters.nodeTypes : []
       const hasName = this.scenarioConfig.name && this.scenarioConfig.name.trim().length > 0
       const hasTopology =
-        this.scenarioConfig.parameters.realNodeCount > 0 ||
-        this.scenarioConfig.parameters.honeypotNodeCount > 0
-      const hasTypes = this.scenarioConfig.parameters.nodeTypes.length > 0
+        Number(parameters.realNodeCount || 0) > 0 ||
+        Number(parameters.honeypotNodeCount || 0) > 0
+      const hasTypes = nodeTypes.length > 0
       return hasName && hasTopology && hasTypes
     },
     activeConfigMeta() {
@@ -253,32 +268,68 @@ export default {
   },
   watch: {
     'scenarioConfig.parameters.realNodeCount'() {
-      this.syncTopologyFromCounts()
+      this.handleTopologyInputsChange()
     },
     'scenarioConfig.parameters.honeypotNodeCount'() {
-      this.syncTopologyFromCounts()
+      this.handleTopologyInputsChange()
     },
     'scenarioConfig.parameters.nodeTypes': {
       handler() {
-        this.syncTopologyFromCounts()
+        this.handleTopologyInputsChange()
       },
       deep: true
     }
   },
   methods: {
     buildScenarioConfig() {
+      return this.normalizeScenarioConfig({
+        id: `scenario-${Date.now()}`,
+        name: '',
+        description: '',
+        parameters: {
+          realNodeCount: 0,
+          honeypotNodeCount: 0,
+          nodeTypes: [],
+          maxRounds: 10,
+          signalNoise: 0.1,
+          rewardMatrix: {
+            defenderSuccess: 2,
+            defenderFail: -2,
+            attackerSuccess: 3,
+            attackerFail: -1
+          }
+        },
+        topology: { nodes: [], links: [] }
+      })
+    },
+    normalizeScenarioConfig(config = {}) {
       const base = getMockScenarioConfig()
+      const parameters = config.parameters || {}
+      const rewardMatrix = parameters.rewardMatrix || base.parameters.rewardMatrix || {}
+      const normalizedTypes = Array.isArray(parameters.nodeTypes)
+        ? parameters.nodeTypes
+        : []
+      const topology = this.decorateTopology(config.topology || { nodes: [], links: [] })
+
       return {
         ...base,
-        id: `scenario-${Date.now()}`,
+        ...config,
         parameters: {
           ...base.parameters,
-          nodeCount: 8,
-          realNodeCount: 6,
-          honeypotNodeCount: 2,
-          nodeTypes: ['控制中心', 'SCADA', 'RTU', '蜜罐']
+          ...parameters,
+          nodeCount: Number(parameters.nodeCount ?? topology?.nodes?.length ?? 0),
+          realNodeCount: Number(parameters.realNodeCount ?? 0),
+          honeypotNodeCount: Number(parameters.honeypotNodeCount ?? 0),
+          nodeTypes: normalizedTypes,
+          rewardMatrix: {
+            ...base.parameters.rewardMatrix,
+            ...rewardMatrix
+          }
         },
-        topology: this.decorateTopology(base.topology)
+        topology: {
+          nodes: Array.isArray(topology?.nodes) ? topology.nodes : [],
+          links: Array.isArray(topology?.links) ? topology.links : []
+        }
       }
     },
     addNodeType() {
@@ -291,17 +342,13 @@ export default {
     removeNodeType(index) {
       this.scenarioConfig.parameters.nodeTypes.splice(index, 1)
     },
-    openConfigPreview() {
-      if (!this.canPreview) return
-      this.showTopologyPreview = true
-    },
-    saveScenario() {
+    async saveScenario() {
       if (!this.isConfigComplete) {
         this.$message.warning('请先完善环境配置')
         return
       }
       const payload = {
-        id: this.scenarioConfig.id || `scenario-${Date.now()}`,
+        id: this.scenarioConfig.id || '',
         name: this.scenarioConfig.name,
         description: this.scenarioConfig.description,
         parameters: this.scenarioConfig.parameters,
@@ -310,10 +357,33 @@ export default {
         defenseAssets: this.defenseAssets,
         updatedAt: new Date().toLocaleString()
       }
-      this.savedConfigs = saveScenarioConfig(payload)
-      this.activeConfigId = payload.id
-      this.canPreview = true
-      this.$message.success('已保存场景配置')
+      try {
+        const exists = this.savedConfigs.some((item) => item.id === payload.id)
+        const saved = exists && payload.id
+          ? await updateScenario(payload.id, payload)
+          : await createScenario(payload)
+        this.savedConfigs = saveScenarioConfig(saved)
+        this.activeConfigId = saved.id
+        this.scenarioConfig = {
+          ...this.scenarioConfig,
+          id: saved.id
+        }
+        this.showTopologyPreview = true
+        this.$message.success('已保存场景配置')
+      } catch (error) {
+        const fallback = {
+          ...payload,
+          id: payload.id || `scenario-${Date.now()}`
+        }
+        this.savedConfigs = saveScenarioConfig(fallback)
+        this.activeConfigId = fallback.id
+        this.scenarioConfig = {
+          ...this.scenarioConfig,
+          id: fallback.id
+        }
+        this.showTopologyPreview = true
+        this.$message.warning(`后端保存失败，已切换为本地保存：${error.message}`)
+      }
     },
     enableCustomConfig() {
       this.isCustomConfig = true
@@ -323,14 +393,9 @@ export default {
         attackStyle: 'stealth',
         allowedActions: ['主机探测', '链路探测']
       }
-      this.defenseAssets = [
-        { name: 'SCADA 主站', type: '真实系统', role: '核心节点', status: '稳定' },
-        { name: 'RTU-1', type: '真实系统', role: '现场控制', status: '稳定' },
-        { name: '蜜罐-1', type: '蜜罐', role: '诱捕', status: '激活' }
-      ]
+      this.syncDefenseAssetsFromScenario()
       this.activeConfigId = ''
       this.selectedPresetId = ''
-      this.canPreview = false
       this.showTopologyPreview = false
     },
     applyPresetConfig() {
@@ -338,37 +403,50 @@ export default {
       if (!preset) return
       this.applyPresetData(preset)
       this.isCustomConfig = false
-      this.canPreview = true
       this.showTopologyPreview = true
       this.activeConfigId = ''
     },
-    loadScenarioConfigs() {
-      this.savedConfigs = getScenarioConfigs()
-      const active = getActiveScenarioConfig()
+    async loadScenarioConfigs() {
+      try {
+        this.savedConfigs = await fetchScenarioConfigs()
+        if (this.savedConfigs.length > 0) {
+          this.savedConfigs.forEach((item) => saveScenarioConfig(item))
+        }
+      } catch (error) {
+        this.savedConfigs = getScenarioConfigs()
+        this.$message.warning(`场景列表加载失败，已使用本地缓存：${error.message}`)
+      }
+
+      const activeId = getActiveScenarioConfig()?.id
+      const active = activeId
+        ? this.savedConfigs.find((item) => item.id === activeId)
+        : this.savedConfigs[0]
       if (active) {
         this.isCustomConfig = true
         this.activeConfigId = active.id
         this.applyScenarioConfig(active.id)
+      } else {
+        this.enableCustomConfig()
       }
     },
     applyScenarioConfig(configId) {
       const config = this.savedConfigs.find((item) => item.id === configId)
       if (!config) return
+      const normalized = this.normalizeScenarioConfig(config)
       this.activeConfigId = config.id
       setActiveScenarioConfigId(config.id)
-      this.scenarioConfig = {
-        ...this.scenarioConfig,
-        id: config.id,
-        name: config.name,
-        description: config.description,
-        parameters: config.parameters,
-        topology: config.topology
-      }
+      this.scenarioConfig = normalized
       this.attackerConfig = config.attackerConfig || this.attackerConfig
-      this.defenseAssets = config.defenseAssets || this.defenseAssets
-      this.canPreview = true
+      this.defenseAssets = Array.isArray(config.defenseAssets) && config.defenseAssets.length > 0
+        ? config.defenseAssets
+        : this.buildDefenseAssetsFromTopology(normalized.topology)
+      this.showTopologyPreview = true
     }
     ,
+    handleTopologyInputsChange() {
+      if (this.isSyncingTopology) return
+      this.syncTopologyFromCounts()
+    },
     syncTopologyFromCounts() {
       if (!this.isCustomConfig) return
       const realCount = Number(this.scenarioConfig.parameters.realNodeCount || 0)
@@ -417,13 +495,20 @@ export default {
           })
         }
       }
-      this.scenarioConfig = {
-        ...this.scenarioConfig,
-        topology: {
-          nodes,
-          links
-        }
+      const nextTopology = {
+        nodes,
+        links
       }
+      const currentTopology = this.scenarioConfig.topology || { nodes: [], links: [] }
+      if (JSON.stringify(currentTopology) === JSON.stringify(nextTopology)) return
+
+      this.isSyncingTopology = true
+      this.scenarioConfig.topology = nextTopology
+      this.scenarioConfig.parameters.nodeCount = realCount + honeypotCount
+      this.defenseAssets = this.buildDefenseAssetsFromTopology(nextTopology)
+      this.$nextTick(() => {
+        this.isSyncingTopology = false
+      })
     },
     getPresetById(presetId) {
       if (!presetId) return null
@@ -508,7 +593,32 @@ export default {
         topology: this.decorateTopology(preset.topology)
       }
       this.attackerConfig = preset.attackerConfig || this.attackerConfig
-      this.defenseAssets = preset.defenseAssets || this.defenseAssets
+      this.defenseAssets = Array.isArray(preset.defenseAssets) && preset.defenseAssets.length > 0
+        ? preset.defenseAssets
+        : this.buildDefenseAssetsFromTopology(preset.topology)
+    },
+    syncDefenseAssetsFromScenario() {
+      this.defenseAssets = this.buildDefenseAssetsFromTopology(this.scenarioConfig.topology)
+    },
+    buildDefenseAssetsFromTopology(topology) {
+      const nodes = Array.isArray(topology?.nodes) ? topology.nodes : []
+      return nodes.map((node) => {
+        const isHoneypot = ['honeypot', '蜜罐'].includes(node.type)
+          || String(node.label || '').includes('蜜罐')
+        return {
+          name: node.label || node.id,
+          type: isHoneypot ? '蜜罐' : '真实系统',
+          role: isHoneypot ? '诱捕' : this.getDefenseRole(node),
+          status: isHoneypot ? '激活' : '稳定'
+        }
+      })
+    },
+    getDefenseRole(node) {
+      const type = String(node.type || node.label || '')
+      if (type.includes('控制') || type.includes('SCADA')) return '核心节点'
+      if (type.includes('RTU') || type.includes('PLC')) return '现场控制'
+      if (type.includes('交换') || type.includes('router')) return '网络枢纽'
+      return '业务节点'
     },
     resolveNodeIcon(typeName) {
       const key = (typeName || '').toString()
@@ -692,6 +802,10 @@ export default {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+.secondary-manager {
+  margin-top: 12px;
 }
 
 .topology-empty {

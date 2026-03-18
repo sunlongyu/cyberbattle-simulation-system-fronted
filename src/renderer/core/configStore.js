@@ -1,3 +1,9 @@
+import {
+  mergeWithDefaultModels,
+  normalizeDisplayModel,
+  normalizeScenarioDisplay
+} from '@/core/displayAdapter'
+
 const SCENARIO_KEY = 'attackDefenseScenarioConfigs'
 const ACTIVE_SCENARIO_KEY = 'attackDefenseActiveScenarioId'
 const MODEL_KEY = 'attackDefenseStrategyModels'
@@ -18,19 +24,27 @@ function writeJson(key, value) {
 }
 
 function getScenarioConfigs() {
-  return readJson(SCENARIO_KEY, [])
+  const configs = readJson(SCENARIO_KEY, [])
+  const normalized = Array.isArray(configs)
+    ? configs.map((config) => normalizeScenarioDisplay(config))
+    : []
+  if (JSON.stringify(configs) !== JSON.stringify(normalized)) {
+    writeJson(SCENARIO_KEY, normalized)
+  }
+  return normalized
 }
 
 function saveScenarioConfig(config) {
   const configs = getScenarioConfigs()
-  const index = configs.findIndex((item) => item.id === config.id)
+  const normalizedConfig = normalizeScenarioDisplay(config)
+  const index = configs.findIndex((item) => item.id === normalizedConfig.id)
   if (index >= 0) {
-    configs[index] = config
+    configs[index] = normalizedConfig
   } else {
-    configs.push(config)
+    configs.push(normalizedConfig)
   }
   writeJson(SCENARIO_KEY, configs)
-  setActiveScenarioConfigId(config.id)
+  setActiveScenarioConfigId(normalizedConfig.id)
   return configs
 }
 
@@ -50,19 +64,32 @@ function getActiveScenarioConfig() {
 }
 
 function getStrategyModels() {
-  return readJson(MODEL_KEY, [])
+  const models = readJson(MODEL_KEY, [])
+  const normalized = mergeWithDefaultModels(Array.isArray(models) ? models : [])
+  if (JSON.stringify(models) !== JSON.stringify(normalized)) {
+    writeJson(MODEL_KEY, normalized)
+  }
+  return normalized
 }
 
 function saveStrategyModel(model) {
   const models = getStrategyModels()
-  const index = models.findIndex((item) => item.id === model.id)
+  const normalizedModel = normalizeDisplayModel(model)
+  const index = models.findIndex((item) => item.id === normalizedModel.id || item.name === normalizedModel.name)
   if (index >= 0) {
-    models[index] = model
+    models[index] = { ...models[index], ...normalizedModel }
   } else {
-    models.push(model)
+    models.push(normalizedModel)
   }
-  writeJson(MODEL_KEY, models)
-  return models
+  const merged = mergeWithDefaultModels(models)
+  writeJson(MODEL_KEY, merged)
+  return merged
+}
+
+function replaceStrategyModels(models) {
+  const merged = mergeWithDefaultModels(Array.isArray(models) ? models : [])
+  writeJson(MODEL_KEY, merged)
+  return merged
 }
 
 function getStrategyModelsByScenario(scenarioId) {
@@ -77,6 +104,11 @@ function getActiveStrategyModelId() {
   return window.localStorage.getItem(ACTIVE_MODEL_KEY)
 }
 
+function migrateDisplayCache() {
+  getScenarioConfigs()
+  getStrategyModels()
+}
+
 export {
   getScenarioConfigs,
   saveScenarioConfig,
@@ -85,7 +117,9 @@ export {
   getActiveScenarioConfig,
   getStrategyModels,
   saveStrategyModel,
+  replaceStrategyModels,
   getStrategyModelsByScenario,
   setActiveStrategyModelId,
-  getActiveStrategyModelId
+  getActiveStrategyModelId,
+  migrateDisplayCache
 }

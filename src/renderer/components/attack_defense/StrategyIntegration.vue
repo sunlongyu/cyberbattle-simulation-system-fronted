@@ -3,48 +3,63 @@
     <div class="module-header">
       <div>
         <h2>智能策略集成</h2>
-        <p>面向强化学习的模型训练、管理与推理配置。</p>
+        <p>管理算法模型，绑定实验场景并完成训练与推演切换。</p>
       </div>
+      <el-button type="primary" @click="showUploadDialog = true">导入模型</el-button>
     </div>
     <div class="module-body">
       <el-card shadow="never" class="config-card">
         <template #header>
-          <div class="card-header header-actions">
+          <div class="card-header">
             <span>模型列表</span>
-            <el-button size="small" @click="openUploadDialog">导入模型</el-button>
+            <el-tag type="info" effect="plain">算法模型</el-tag>
           </div>
         </template>
         <el-table :data="filteredModels" style="width: 100%">
           <el-table-column prop="name" label="模型名称" />
-          <el-table-column prop="scene" label="适用场景" />
-          <el-table-column prop="version" label="版本" width="120" />
-          <el-table-column label="训练指标" width="200">
+          <el-table-column label="适配场景" min-width="240">
             <template #default="{ row }">
-              <div v-if="row.metrics" class="metric-cell">
-                <span>胜率 {{ row.metrics.winRate }}%</span>
-                <span>收益 {{ row.metrics.avgReward }}</span>
-              </div>
-              <span v-else class="metric-empty">-</span>
+              <el-select
+                :model-value="row.scenarioId || ''"
+                placeholder="选择已配置场景"
+                clearable
+                @change="(value) => assignScenario(row, value)"
+              >
+                <el-option
+                  v-for="config in scenarioConfigs"
+                  :key="config.id"
+                  :label="config.name"
+                  :value="config.id"
+                />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="280">
+            <template #default="{ row }">
+              <el-button
+                type="primary"
+                link
+                :disabled="!row.scenarioId || row.status === 'training' || row.access !== 'backend'"
+                @click="openTrainingPanel(row)"
+              >
+                {{ row.access === 'backend' ? (row.status === 'training' ? '训练中' : '训练') : '即将开放' }}
+              </el-button>
+              <el-button
+                type="success"
+                link
+                :disabled="row.status !== 'ready' || row.access !== 'backend'"
+                @click="activateRowModel(row)"
+              >
+                激活
+              </el-button>
+              <el-button type="danger" link @click="deleteModel(row)">删除</el-button>
             </template>
           </el-table-column>
           <el-table-column prop="status" label="状态" width="120">
             <template #default="{ row }">
-              <el-tag :type="statusTagType(row.status)">
-                {{ statusLabel(row.status) }}
+              <el-tag :type="modelStatusTagType(row)">
+                {{ modelStatusLabel(row) }}
               </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="200">
-            <template #default="{ row }">
-              <el-button
-                type="warning"
-                link
-                :disabled="row.status !== 'untrained'"
-                @click="openTrainingPanel(row)"
-              >
-                训练
-              </el-button>
-              <el-button type="danger" link @click="deleteModel(row)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -100,51 +115,55 @@
           <el-button type="success" @click="activateModel">激活模型</el-button>
         </div>
       </el-card>
-      <el-card shadow="never" class="config-card">
-        <template #header>
-          <div class="card-header">
-            <span>策略接入说明</span>
-            <el-tag type="success" effect="plain">参考流程</el-tag>
-          </div>
-        </template>
-        <div class="guide-list">
-          <div class="guide-item">1. 在“攻防环境设置”中配置场景参数与拓扑。</div>
-          <div class="guide-item">2. 在本模块选择未训练模型，启动训练。</div>
-          <div class="guide-item">3. 训练完成后点击激活，模型状态更新为“已激活”。</div>
-          <div class="guide-item">4. 在“攻防实时推演”中选择已激活模型进行推演。</div>
-        </div>
-      </el-card>
     </div>
 
     <el-dialog v-model="showUploadDialog" title="导入模型" width="420px">
-      <div class="upload-placeholder">
-        <el-icon><Upload /></el-icon>
-        <p>模型文件上传与校验</p>
-      </div>
+      <el-form label-width="96px">
+        <el-form-item label="模型名称">
+          <el-input v-model="uploadForm.name" placeholder="例如：SG-MAPPO-电网防御" />
+        </el-form-item>
+        <el-form-item label="算法类型">
+          <el-select v-model="uploadForm.algorithmType" placeholder="选择算法">
+            <el-option label="MAPPO" value="MAPPO" />
+            <el-option label="PPO" value="PPO" />
+            <el-option label="DQN" value="DQN" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="版本号">
+          <el-input v-model="uploadForm.version" placeholder="例如：v1.0" />
+        </el-form-item>
+      </el-form>
       <template #footer>
-        <el-button @click="showUploadDialog = false">关闭</el-button>
+        <el-button @click="showUploadDialog = false">取消</el-button>
+        <el-button type="primary" :disabled="!uploadForm.name || !uploadForm.algorithmType" @click="importLocalModel">
+          导入
+        </el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script>
-import { Upload } from '@element-plus/icons-vue'
 import {
   getScenarioConfigs,
   getActiveScenarioConfig,
   setActiveScenarioConfigId,
   getStrategyModels,
+  replaceStrategyModels,
   saveStrategyModel,
-  getStrategyModelsByScenario,
   setActiveStrategyModelId
 } from '@/core/configStore'
+import {
+  activateModel as activateModelRequest,
+  fetchModels,
+  importModel as importModelRequest,
+  normalizeDisplayModel,
+  reconcileModels,
+  trainModel as trainModelRequest
+} from '@/core/modelService'
 
 export default {
   name: 'StrategyIntegration',
-  components: {
-    Upload
-  },
   data() {
     return {
       showUploadDialog: false,
@@ -158,13 +177,20 @@ export default {
       },
       modelList: [],
       activeModelId: '',
-      trainingLogs: []
+      trainingLogs: [],
+      uploadForm: {
+        name: '',
+        algorithmType: 'MAPPO',
+        version: 'v1.0'
+      }
     }
   },
   computed: {
     filteredModels() {
-      if (!this.activeScenarioId) return this.modelList
-      return this.modelList.filter((item) => !item.scenarioId || item.scenarioId === this.activeScenarioId)
+      return this.modelList.map((item) => ({
+        ...normalizeDisplayModel(item),
+        scene: this.resolveScenarioName(item.scenarioId)
+      }))
     },
     activeModel() {
       const modelId = this.trainingModelId || this.activeModelId
@@ -188,59 +214,75 @@ export default {
     this.loadModels()
   },
   methods: {
-    openUploadDialog() {
-      this.showUploadDialog = true
-    },
-    startTraining() {
+    async startTraining() {
       const scenario = this.scenarioConfigs.find((item) => item.id === this.activeScenarioId)
       if (!this.trainingModelId) return
-      this.updateModelStatus(this.trainingModelId, 'training', {
-        scenarioId: scenario ? scenario.id : '',
-        scene: scenario ? scenario.name : '未命名环境'
-      })
+      if (this.activeModel?.access !== 'backend') {
+        this.$message.warning('当前模型未接入后端训练能力，请切换到已接入模型')
+        return
+      }
       this.trainingLogs = [
         `已选择训练环境：${scenario ? scenario.name : '未命名环境'}`,
+        `算法类型：${this.activeModel?.algorithmType || '-'}`,
         `训练轮数：${this.trainingForm.epochs}，学习率：${this.trainingForm.learningRate}`,
-        '训练任务已启动，正在初始化环境...'
+        '训练任务已启动，正在初始化环境'
       ]
-      setTimeout(() => {
-        this.trainingLogs.push('训练完成，已生成策略权重（Mock）')
-        this.updateModelStatus(this.trainingModelId, 'ready', {
-          metrics: this.generateMockMetrics(),
-          lastTrainedAt: new Date().toLocaleString()
+      try {
+        this.updateModelStatus(this.trainingModelId, 'training', {
+          scenarioId: scenario ? scenario.id : '',
+          scene: scenario ? scenario.name : '未命名环境'
         })
-      }, 800)
-      this.$message.success('训练已启动（Mock）')
-    },
-    openTrainingPanel(row) {
-      if (row.status !== 'untrained') return
-      this.trainingModelId = row.id
-      this.trainingLogs = []
-      if (this.activeScenarioId) return
-      const active = getActiveScenarioConfig()
-      if (active) {
-        this.activeScenarioId = active.id
+        const trained = await trainModelRequest(this.trainingModelId, {
+          scenarioId: this.activeScenarioId,
+          epochs: this.trainingForm.epochs,
+          learningRate: this.trainingForm.learningRate,
+          notes: this.trainingForm.notes
+        })
+        this.trainingLogs.push('训练完成，策略参数已更新')
+        this.upsertModel(trained)
+        this.$message.success('训练完成')
+      } catch (error) {
+        this.updateModelStatus(this.trainingModelId, 'untrained')
+        this.trainingLogs.push(`训练失败：${error.message}`)
+        this.$message.error(`训练失败：${error.message}`)
       }
     },
-    deleteModel(row) {
+    openTrainingPanel(row) {
+      this.trainingModelId = row.id
+      this.trainingLogs = []
+      this.activeScenarioId = row.scenarioId || this.activeScenarioId
+    },
+    async activateModel() {
+      if (!this.activeModel) return
+      if (this.activeModel.status !== 'ready') return
+      try {
+        await activateModelRequest(this.activeModel.id)
+        this.activeModelId = this.activeModel.id
+        this.updateModelStatus(this.activeModel.id, 'active')
+        setActiveStrategyModelId(this.activeModel.id)
+        this.$message.success(`已激活模型：${this.activeModel.name}`)
+      } catch (error) {
+        this.$message.error(`激活失败：${error.message}`)
+      }
+    },
+    activateRowModel(row) {
+      this.activeModelId = row.id
+      this.trainingModelId = row.id
+      this.activeScenarioId = row.scenarioId || this.activeScenarioId
+      this.activateModel()
+    },
+    async deleteModel(row) {
       this.modelList = this.modelList.filter((item) => item.id !== row.id)
+      this.modelList = replaceStrategyModels(this.modelList)
       if (this.activeModelId === row.id) {
         this.activeModelId = ''
-        this.trainingLogs = []
+        setActiveStrategyModelId('')
       }
       if (this.trainingModelId === row.id) {
         this.trainingModelId = ''
         this.trainingLogs = []
       }
       this.$message.success(`已删除模型：${row.name}`)
-    },
-    activateModel() {
-      if (!this.activeModel) return
-      if (this.activeModel.status !== 'ready') return
-      this.activeModelId = this.activeModel.id
-      this.updateModelStatus(this.activeModel.id, 'active')
-      setActiveStrategyModelId(this.activeModel.id)
-      this.$message.success(`已激活模型：${this.activeModel.name}`)
     },
     loadScenarioConfigs() {
       this.scenarioConfigs = getScenarioConfigs()
@@ -254,76 +296,137 @@ export default {
       if (selected) {
         setActiveScenarioConfigId(selected.id)
       }
-    },
-    loadModels() {
-      const stored = getStrategyModels()
-      if (stored && stored.length) {
-        const seeds = [
-          {
-            id: 'model-dqn-004',
-            name: 'DQN-Defense',
-            scene: '通用拓扑',
-            version: 'v0.7',
-            status: 'untrained',
-            scenarioId: '',
-            metrics: null,
-            lastTrainedAt: '-'
-          }
-        ]
-        const existingIds = new Set(stored.map((item) => item.id))
-        const merged = [...stored]
-        seeds.forEach((seed) => {
-          if (!existingIds.has(seed.id)) {
-            merged.push(seed)
-            saveStrategyModel(seed)
-          }
-        })
-        this.modelList = merged
-      } else {
-        this.modelList = [
-          {
-            id: 'model-sg-mappo-001',
-            name: 'SG-MAPPO-Base',
-            scene: '通用拓扑',
-            version: 'v1.0',
-            status: 'untrained',
-            scenarioId: '',
-            metrics: null,
-            lastTrainedAt: '-'
-          },
-          {
-            id: 'model-dqn-004',
-            name: 'DQN-Defense',
-            scene: '通用拓扑',
-            version: 'v0.7',
-            status: 'untrained',
-            scenarioId: '',
-            metrics: null,
-            lastTrainedAt: '-'
-          },
-          {
-            id: 'model-ppo-002',
-            name: 'PPO-Defense',
-            scene: '企业内网',
-            version: 'v0.9',
-            status: 'ready',
-            scenarioId: '',
-            metrics: { winRate: 58, avgReward: 1.4 },
-            lastTrainedAt: '2026-02-08'
-          },
-          {
-            id: 'model-a2c-003',
-            name: 'A2C-Baseline',
-            scene: '电网控制区',
-            version: 'v0.8',
-            status: 'training',
-            scenarioId: '',
-            metrics: null,
-            lastTrainedAt: '-'
-          }
-        ]
-        this.modelList.forEach((model) => saveStrategyModel(model))
+      if (this.trainingModelId) {
+        this.assignScenario({ id: this.trainingModelId }, configId, false)
       }
+    },
+    async loadModels() {
+      const stored = getStrategyModels()
+      try {
+        const remoteModels = await fetchModels()
+        const merged = reconcileModels(remoteModels, stored)
+        if (merged.length > 0) {
+          const normalized = merged.map((model) => normalizeDisplayModel(model))
+          normalized.forEach((model) => saveStrategyModel(model))
+          this.modelList = normalized
+          return
+        }
+      } catch (error) {
+        this.$message.warning(`模型列表加载失败，已使用本地缓存：${error.message}`)
+      }
+
+      if (stored && stored.length) {
+        this.modelList = stored.map((model) => normalizeDisplayModel(model))
+        return
+      }
+
+      const seeds = [
+        {
+          name: 'SG-MAPPO',
+          algorithmType: 'MAPPO',
+          version: 'v1.0',
+          notes: '主展示模型',
+          access: 'backend'
+        },
+        {
+          name: 'PPO-Defense',
+          algorithmType: 'PPO',
+          version: 'v1.0',
+          notes: '单智能体防御策略基线模型'
+        },
+        {
+          name: 'DQN-Defense',
+          algorithmType: 'DQN',
+          version: 'v0.9',
+          notes: '离散动作快速响应模型'
+        },
+        {
+          name: 'A2C-Defense',
+          algorithmType: 'A2C',
+          version: 'v0.8',
+          notes: '轻量占位模型'
+        }
+      ]
+
+      const createdModels = []
+      for (const seed of seeds) {
+        const fallback = normalizeDisplayModel({
+          id: `model-${Date.now()}-${createdModels.length}`,
+          name: seed.name,
+          algorithmType: seed.algorithmType,
+          access: seed.access || 'placeholder',
+          scene: '',
+          version: seed.version,
+          status: 'untrained',
+          scenarioId: '',
+          metrics: null,
+          lastTrainedAt: '-'
+        })
+        createdModels.push(fallback)
+        saveStrategyModel(fallback)
+      }
+      this.modelList = createdModels
+    },
+    async importLocalModel() {
+      const payload = {
+        name: this.uploadForm.name.trim(),
+        algorithmType: this.uploadForm.algorithmType,
+        version: this.uploadForm.version || 'v1.0'
+      }
+      if (!payload.name) return
+      try {
+        const created = await importModelRequest(payload)
+        this.upsertModel(created)
+      } catch (error) {
+        const fallback = normalizeDisplayModel({
+          id: `model-${Date.now()}`,
+          name: payload.name,
+          algorithmType: payload.algorithmType,
+          access: 'placeholder',
+          scene: '',
+          version: payload.version,
+          status: 'untrained',
+          scenarioId: '',
+          metrics: null,
+          lastTrainedAt: '-'
+        })
+        this.upsertModel(fallback)
+      }
+      this.showUploadDialog = false
+      this.uploadForm = {
+        name: '',
+        algorithmType: 'MAPPO',
+        version: 'v1.0'
+      }
+      this.$message.success('模型已导入')
+    },
+    assignScenario(row, scenarioId, syncActive = true) {
+      const selected = this.scenarioConfigs.find((item) => item.id === scenarioId)
+      const nextScenarioId = scenarioId || ''
+      const scene = selected ? selected.name : ''
+      this.modelList = this.modelList.map((item) => {
+        if (item.id !== row.id) return item
+        const updated = {
+          ...item,
+          scenarioId: nextScenarioId,
+          scene
+        }
+        saveStrategyModel(updated)
+        return updated
+      })
+      if (syncActive && nextScenarioId) {
+        this.activeScenarioId = nextScenarioId
+        setActiveScenarioConfigId(nextScenarioId)
+      }
+    },
+    upsertModel(model) {
+      const existingIndex = this.modelList.findIndex((item) => item.id === model.id)
+      if (existingIndex >= 0) {
+        this.modelList.splice(existingIndex, 1, model)
+      } else {
+        this.modelList.push(model)
+      }
+      saveStrategyModel(model)
     },
     updateModelStatus(modelId, status, overrides = {}) {
       this.modelList = this.modelList.map((item) => {
@@ -340,10 +443,10 @@ export default {
         return item
       })
     },
-    generateMockMetrics() {
-      const winRate = Math.floor(50 + Math.random() * 40)
-      const avgReward = Number((1 + Math.random() * 2).toFixed(2))
-      return { winRate, avgReward }
+    resolveScenarioName(scenarioId) {
+      if (!scenarioId) return '未绑定'
+      const selected = this.scenarioConfigs.find((item) => item.id === scenarioId)
+      return selected ? selected.name : '未绑定'
     },
     statusLabel(status) {
       if (status === 'untrained') return '未训练'
@@ -356,6 +459,14 @@ export default {
       if (status === 'active') return 'success'
       if (status === 'ready') return 'info'
       return 'warning'
+    },
+    modelStatusLabel(model) {
+      if (model.access !== 'backend') return '待开放'
+      return this.statusLabel(model.status)
+    },
+    modelStatusTagType(model) {
+      if (model.access !== 'backend') return 'info'
+      return this.statusTagType(model.status)
     }
   }
 }
@@ -413,10 +524,6 @@ export default {
   font-weight: 600;
 }
 
-.header-actions {
-  width: 100%;
-}
-
 .training-form .el-form-item {
   max-width: 560px;
 }
@@ -436,18 +543,6 @@ export default {
   justify-content: flex-end;
 }
 
-.metric-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
-  color: #475569;
-}
-
-.metric-empty {
-  color: #94a3b8;
-}
-
 .scenario-warning {
   margin-bottom: 12px;
 }
@@ -463,26 +558,4 @@ export default {
   gap: 6px;
 }
 
-.guide-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  font-size: 14px;
-  color: #41516a;
-}
-
-.upload-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 24px;
-  color: #6b7a90;
-}
-
-@media (max-width: 1200px) {
-  .module-body {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

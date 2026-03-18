@@ -4,17 +4,17 @@ import App from './App.vue'
 import router from './router' // 导入刚才创建的路由实例
 import store from './store'
 import ElementPlus from 'element-plus'
+import { ElMessage } from 'element-plus'
 import 'element-plus/dist/index.css'
-//大屏展示
-import dataV from '@jiaminghi/data-view'
 import {setupListener,setupStoreIPC} from './core/store.js'
+import { migrateDisplayCache } from './core/configStore'
 const SSR = false
 // 将Electron和fs绑定到Vue原型链上
 const app = createApp(App)
 //使用UI库
 app.use(router) // 使用路由
 app.use(ElementPlus)
-app.use(dataV)
+app.config.globalProperties.$message = ElMessage
 
 // 首先确保在Vue应用准备阶段获取Electron API
 if (SSR === false) { // 非SSR情况下（仅客户端）
@@ -32,5 +32,6 @@ if (SSR === false) { // 非SSR情况下（仅客户端）
 }
 
 app.use(store) // 使用store
+migrateDisplayCache()
 // 挂载Vue应用
 app.mount('#app')

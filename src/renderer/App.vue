@@ -12,32 +12,17 @@
     <div class="layout-body">
       <aside class="side-nav">
         <router-link
-          to="/environment-setup"
-          :class="currentRouteName === 'environmentSetup' ? 'router-active' : ''"
+          v-for="item in navigationItems"
+          :key="item.name"
+          :to="item.path"
+          :class="currentRouteName === item.name ? 'router-active' : ''"
         >
-          攻防环境设置
-        </router-link>
-        <router-link
-          to="/strategy-integration"
-          :class="currentRouteName === 'strategyIntegration' ? 'router-active' : ''"
-        >
-          智能策略集成
-        </router-link>
-        <router-link
-          to="/real-time-simulation"
-          :class="currentRouteName === 'realTimeSimulation' ? 'router-active' : ''"
-        >
-          攻防实时推演
-        </router-link>
-        <router-link
-          to="/multi-dim-analysis"
-          :class="currentRouteName === 'multiDimAnalysis' ? 'router-active' : ''"
-        >
-          多维可视分析
+          <span>{{ item.meta.title }}</span>
+          <small>{{ item.meta.description }}</small>
         </router-link>
       </aside>
       <main class="main-container">
-        <router-view></router-view>
+        <router-view :key="$route.fullPath"></router-view>
       </main>
     </div>
   </div>
@@ -47,25 +32,27 @@
 export default {
   name: 'App',
   title:'攻防博弈', 
-  data() {
-    return {
-      currentRouteName:'environmentSetup'
+  computed: {
+    currentRouteName() {
+      return this.$route.name
+    },
+    navigationItems() {
+      const routes = this.$router
+        .getRoutes()
+        .filter((route) => route.meta && route.meta.showInNav && !route.aliasOf)
+        .sort((a, b) => (a.meta.navOrder || 0) - (b.meta.navOrder || 0))
+
+      const seen = new Set()
+      return routes.filter((route) => {
+        const key = route.name || route.meta?.title || route.path
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
     }
   },
-  computed: {
-    
-  },
-  created(){
-    
-  },
-  mounted() {
-  
-  },
   watch:{
-    '$route.name'(newVal,oldVal){
-      this.currentRouteName = newVal
-    },
-    '$store.state.global.message'(newVal,oldVal){
+    '$store.state.global.message'(newVal){
       if(newVal['message']=='')return
 
       if(newVal['type']=='success'){
@@ -78,10 +65,7 @@ export default {
     }
 
   },
-  methods: {
-    
-  }
-
+  methods: {}
 }
 </script>
 
@@ -178,11 +162,25 @@ body::-webkit-scrollbar {
   color: #2c3e50;
   text-decoration: none;
   transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .side-nav a:hover{
   color: #fff;
   background-color: #2f6ed6;
+}
+
+.side-nav a small{
+  color: #7c8aa5;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.side-nav a:hover small,
+.router-link-active small{
+  color: rgba(255,255,255,0.82);
 }
 
 .main-container{
